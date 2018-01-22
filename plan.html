@@ -1,0 +1,619 @@
+<!DOCTYPE html>
+<meta charset="utf-8">
+<body>
+<script src="https://code.jquery.com/jquery-3.2.1.slim.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/3.5.3/d3.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/topojson/1.6.9/topojson.min.js"></script>
+<script src="https://datamaps.github.io/scripts/0.5.8/datamaps.all.hires.min.js"></script>
+
+
+<div id="container" style="position: relative; width: 100%; height: 600px;"></div>
+
+<button class="zoom-button" data-zoom="reset">0</button>
+<button class="zoom-button" data-zoom="out">-</button>
+<button class="zoom-button" data-zoom="in">+</button>
+<div id="zoom-info"></div>
+
+<style>
+  body {
+  font-family: arial;
+}
+
+#container {
+  margin-bottom: 5px;
+  overflow: hidden;
+  border: 1px solid silver;
+  margin: -2px;
+  border-radius: 3px;
+  background: white;
+}
+
+.zoom-button {
+  width: 30px;
+  height: 30px;
+  border-radius: 4px;
+  border: none;
+  background: silver;
+  font-size: 16px;
+  color: white;
+  cursor: pointer;
+}
+
+#zoom-info {
+  display: inline-block;
+  padding: 10px;
+}
+
+</style>
+
+  
+     <script>
+function Zoom(args) {
+  $.extend(this, {
+    $buttons: $(".zoom-button"),
+    $info: $("#zoom-info"),
+    scale: {
+      max: 3,
+      currentShift: 0
+    },
+    $container: args.$container,
+    datamap: args.datamap
+  });
+
+  this.init();
+}
+
+Zoom.prototype.init = function() {
+  var paths = this.datamap.svg.selectAll("path"),
+    subunits = this.datamap.svg.selectAll(".datamaps-subunit");
+
+  // preserve stroke thickness
+  paths.style("vector-effect", "non-scaling-stroke");
+
+  // disable click on drag end
+  subunits.call(
+    d3.behavior.drag().on("dragend", function() {
+      d3.event.sourceEvent.stopPropagation();
+    })
+  );
+
+  this.scale.set = this._getScalesArray();
+  this.d3Zoom = d3.behavior.zoom().scaleExtent([1, this.scale.max]);
+
+  this._displayPercentage(1);
+  this.listen();
+};
+
+Zoom.prototype.listen = function() {
+  this.$buttons.off("click").on("click", this._handleClick.bind(this));
+
+  this.datamap.svg
+    .call(this.d3Zoom.on("zoom", this._handleScroll.bind(this)))
+    .on("dblclick.zoom", null); // disable zoom on double-click
+};
+
+Zoom.prototype.reset = function() {
+  this._shift("reset");
+};
+
+Zoom.prototype._handleScroll = function() {
+  var translate = d3.event.translate,
+    scale = d3.event.scale,
+    limited = this._bound(translate, scale);
+
+  this.scrolled = true;
+
+  this._update(limited.translate, limited.scale);
+};
+
+Zoom.prototype._handleClick = function(event) {
+  var direction = $(event.target).data("zoom");
+
+  this._shift(direction);
+};
+
+Zoom.prototype._shift = function(direction) {
+  var center = [this.$container.width() / 2, this.$container.height() / 2],
+    translate = this.d3Zoom.translate(),
+    translate0 = [],
+    l = [],
+    view = {
+      x: translate[0],
+      y: translate[1],
+      k: this.d3Zoom.scale()
+    },
+    bounded;
+
+  translate0 = [
+    (center[0] - view.x) / view.k,
+    (center[1] - view.y) / view.k
+  ];
+
+  if (direction == "reset") {
+    view.k = 1;
+    this.scrolled = true;
+  } else {
+    view.k = this._getNextScale(direction);
+  }
+
+  l = [translate0[0] * view.k + view.x, translate0[1] * view.k + view.y];
+
+  view.x += center[0] - l[0];
+  view.y += center[1] - l[1];
+
+  bounded = this._bound([view.x, view.y], view.k);
+
+  this._animate(bounded.translate, bounded.scale);
+};
+
+Zoom.prototype._bound = function(translate, scale) {
+  var width = this.$container.width(),
+    height = this.$container.height();
+
+  translate[0] = Math.min(
+    (width / height) * (scale - 1),
+    Math.max(width * (1 - scale), translate[0])
+  );
+
+  translate[1] = Math.min(0, Math.max(height * (1 - scale), translate[1]));
+
+  return {
+    translate: translate,
+    scale: scale
+  };
+};
+
+Zoom.prototype._update = function(translate, scale) {
+  this.d3Zoom
+    .translate(translate)
+    .scale(scale);
+
+  this.datamap.svg.selectAll("g")
+    .attr("transform", "translate(" + translate + ")scale(" + scale + ")");
+
+  this._displayPercentage(scale);
+};
+
+Zoom.prototype._animate = function(translate, scale) {
+  var _this = this,
+    d3Zoom = this.d3Zoom;
+
+  d3.transition().duration(350).tween("zoom", function() {
+    var iTranslate = d3.interpolate(d3Zoom.translate(), translate),
+      iScale = d3.interpolate(d3Zoom.scale(), scale);
+
+    return function(t) {
+      _this._update(iTranslate(t), iScale(t));
+    };
+  });
+};
+
+Zoom.prototype._displayPercentage = function(scale) {
+  var value;
+
+  value = Math.round(Math.log(scale) / Math.log(this.scale.max) * 100);
+  this.$info.text(value + "%");
+};
+
+Zoom.prototype._getScalesArray = function() {
+  var array = [],
+    scaleMaxLog = Math.log(this.scale.max);
+
+  for (var i = 0; i <= 10; i++) {
+    array.push(Math.pow(Math.E, 0.1 * i * scaleMaxLog));
+  }
+
+  return array;
+};
+
+Zoom.prototype._getNextScale = function(direction) {
+  var scaleSet = this.scale.set,
+    currentScale = this.d3Zoom.scale(),
+    lastShift = scaleSet.length - 1,
+    shift, temp = [];
+
+  if (this.scrolled) {
+
+    for (shift = 0; shift <= lastShift; shift++) {
+      temp.push(Math.abs(scaleSet[shift] - currentScale));
+    }
+
+    shift = temp.indexOf(Math.min.apply(null, temp));
+
+    if (currentScale >= scaleSet[shift] && shift < lastShift) {
+      shift++;
+    }
+
+    if (direction == "out" && shift > 0) {
+      shift--;
+    }
+
+    this.scrolled = false;
+
+  } else {
+
+    shift = this.scale.currentShift;
+
+    if (direction == "out") {
+      shift > 0 && shift--;
+    } else {
+      shift < lastShift && shift++;
+    }
+  }
+
+  this.scale.currentShift = shift;
+
+  return scaleSet[shift];
+};
+
+function Datamap() {
+  this.$container = $("#container");
+  this.instance = new Datamaps({
+    scope: 'world',
+    element: this.$container.get(0),
+    projection: 'mercator',
+    done: this._handleMapReady.bind(this),
+    height: 600,
+    fills: {
+      defaultFill: '#888',
+      lt50: '#da5861',
+      gt50: '#da5861ff'
+    },
+    geographyConfig: {
+      highlightOnHover: false,
+      popupOnHover: false
+    },
+    arcConfig: {
+      popupOnHover: true
+    },
+    setProjection: function(element) {
+      var projection = d3.geo
+        .orthographic()
+        .rotate([15, -66])
+        .center([0, 0])
+        .scale(950)
+        .translate([element.offsetWidth / 2, element.offsetHeight / 2]);
+      var path = d3.geo.path()
+        .projection(projection);
+      return {
+        path: path,
+        projection: projection
+      }
+    }
+
+  });
+
+  this.instance.arc(
+    [{
+        origin: {
+          latitude: 51.394526,
+          longitude: 3.555878
+        },
+        destination: {
+          latitude: 60.391263,
+          longitude: 5.322054
+        },
+        // duration in weeks
+        duration: 2,
+        //distance in nautical miles
+        distance: 800,
+        leg: "Breskens – Bergen"
+      }, {
+        origin: {
+          latitude: 60.391263,
+          longitude: 5.322054
+        },
+        destination: {
+          latitude: 67.906261,
+          longitude: 12.921295
+        },
+        duration: 2,
+        arcSharpness: -1,
+        distance: 1000,
+        leg: "Bergen – Lofoten"
+      }, {
+        destination: {
+          latitude: 69.649205,
+          longitude: 18.955324
+        },
+        origin: {
+          latitude: 67.906261,
+          longitude: 12.921295
+        },
+        duration: 1,
+        distance: 350,
+        arcSharpness: -0.5,
+        leg: "Lofoten – Tromso"
+      }, {
+        origin: {
+          latitude: 69.649205,
+          longitude: 18.955324
+        },
+        destination: {
+          latitude: 78.223172,
+          longitude: 15.626723
+        },
+        duration: 2,
+        distance: 900,
+        leg: "Tromso – Longyearbyen"
+      },
+
+      // leg around svalbard
+      {
+        destination: {
+          latitude: 78.028081,
+          longitude: 12.623291
+        },
+        origin: {
+          latitude: 78.223172,
+          longitude: 15.626723
+        },
+        duration: 2,
+        distance: 1000,
+        arcSharpness: 0,
+        leg: "Longyearbyen – rund Spitzbergen"
+      }, {
+        origin: {
+          latitude: 78.028081,
+          longitude: 12.623291
+        },
+        destination: {
+          latitude: 76.103699,
+          longitude: 16.336670
+        },
+        duration: 2,
+        distance: 1000,
+        arcSharpness: -0.5,
+        leg: "Longyearbyen – rund Spitzbergen"
+      }, {
+        destination: {
+          latitude: 77.179366,
+          longitude: 25.323486
+        },
+        origin: {
+          latitude: 76.103699,
+          longitude: 16.336670
+        },
+        duration: 2,
+        distance: 1000,
+        arcSharpness: 0.1,
+        leg: "Longyearbyen – rund Spitzbergen"
+      }, {
+        origin: {
+          latitude: 77.179366,
+          longitude: 25.323486
+        },
+        destination: {
+          latitude: 78.872381,
+          longitude: 24.620361
+        },
+        duration: 2,
+        distance: 1000,
+        arcSharpness: 0.2,
+        leg: "Longyearbyen – rund Spitzbergen"
+      }, {
+        destination: {
+          latitude: 80.347974,
+          longitude: 29.542236
+        },
+        origin: {
+          latitude: 78.872381,
+          longitude: 24.620361
+        },
+        duration: 2,
+        distance: 1000,
+        arcSharpness: 0.1,
+        leg: "Longyearbyen – rund Spitzbergen"
+      }, {
+        origin: {
+          latitude: 80.347974,
+          longitude: 29.542236
+        },
+        destination: {
+          latitude: 80.598884,
+          longitude: 11.195068
+        },
+        duration: 2,
+        distance: 1000,
+        arcSharpness: 0.4,
+        leg: "Longyearbyen – rund Spitzbergen"
+      }, {
+        destination: {
+          latitude: 77.968684,
+          longitude: 11.063232
+        },
+        origin: {
+          latitude: 80.598884,
+          longitude: 11.195068
+        },
+        duration: 2,
+        distance: 1000,
+        arcSharpness: -0.3,
+        leg: "Longyearbyen – rund Spitzbergen"
+      },
+
+     
+     // other 'normal' legs
+      {
+        destination: {
+          latitude: 70.500000,
+          longitude: -25.000000
+        },
+        origin: {
+          latitude: 78.223172,
+          longitude: 15.626723
+        },
+        duration: 3,
+        distance: 1700,
+        arcSharpness: -1,
+        leg: "Longyearbyen – Scoresby Sound - Akureyri"
+      },
+      {
+        destination: {
+          latitude: 65.68849209999999,
+          longitude: -18.12616939999998
+        },
+        origin: {
+          latitude: 70.500000,
+          longitude: -25.000000
+        },
+        duration: 3,
+        distance: 1700,
+        arcSharpness: 1,
+        leg: "Longyearbyen – Scoresby Sound - Akureyri"
+      },
+     
+     {
+        origin: {
+          latitude: 65.68849209999999,
+          longitude: -18.12616939999998
+        },
+        destination: {
+          latitude: 61.156703,
+          longitude: -45.425430
+        },
+        duration: 3,
+        distance: 1400,
+        arcSharpness: -2.5,
+        leg: "Akureyri – Narsasuaq"
+      }, {
+        destination: {
+          latitude: 64.181410,
+          longitude: -51.694138
+        },
+        origin: {
+          latitude: 61.156703,
+          longitude: -45.425430
+        },
+        duration: 2,
+        distance: 700,
+        arcSharpness: -0.9,
+        leg: "Narsasuaq – Nuuk"
+      }, {
+        origin: {
+          latitude: 64.181410,
+          longitude: -51.694138
+        },
+        destination: {
+          latitude: 69.219812,
+          longitude: -51.098603
+        },
+        duration: 2,
+        distance: 700,
+        arcSharpness: 0,
+        leg: "Nuuk – Fjorde – Disco Bugt – Ilulissat"
+      }, {
+        origin: {
+          latitude: 69.219812,
+          longitude: -51.098603
+        },
+        destination: {
+          latitude: 69.039958,
+          longitude: -53.300171
+        },
+        duration: 1,
+        distance: 300,
+        arcSharpness: 0.5,
+        leg: "Ilulissat – Disco Bugt – Ilulissat"
+      },
+    ], {
+      strokeWidth: 5,
+      arcSharpness: -0.4,
+      greatArc: false,
+      popupTemplate: function(geo, data) {
+        return "<div class='hoverinfo'><h4>" + data.leg + "</h3>Distanz: " + data.distance + "nm<br/>Dauer: " + data.duration + "w" + "</div>";
+      }
+    }
+  );
+
+
+  //bubbles, custom popup on hover template
+  this.instance.bubbles([
+    // bubbles with ports/stops
+    {
+      name: 'Breskens',
+      latitude: 51.394526,
+      longitude: 3.555878,
+      radius: 6,
+      fillKey: 'gt50'
+    }, {
+      name: 'Bergen',
+      latitude: 60.391263,
+      longitude: 5.322054,
+      radius: 6,
+      fillKey: 'gt50'
+    }, {
+      name: 'Lofoten',
+      latitude: 67.906261,
+      longitude: 12.921295,
+      radius: 6,
+      fillKey: 'gt50'
+    },
+    {
+      name: 'Akureyri',
+      latitude: 65.68849209999999,
+      longitude: -18.12616939999998,
+      radius: 6,
+      fillKey: 'gt50'
+    }
+    , {
+      name: 'Tromso',
+      latitude: 69.649205,
+      longitude: 18.955324,
+      radius: 6,
+      fillKey: 'gt50'
+    }, {
+      name: 'Nuuk',
+      latitude: 64.181410,
+      longitude: -51.694138,
+      radius: 6,
+      fillKey: 'gt50'
+    }, {
+      name: 'Longyearbyen',
+      latitude: 78.223172,
+      longitude: 15.626723,
+      radius: 6,
+      fillKey: 'gt50'
+    }, {
+      name: 'Scoresby Sound',
+      latitude: 70.500000,
+      longitude: -25.000000,
+      radius: 6,
+      fillKey: 'gt50'
+    }, {
+      name: 'Narsasuaq',
+      latitude: 61.156703,
+      longitude: -45.425430,
+      radius: 6,
+      fillKey: 'gt50'
+    }, {
+      name: 'Disco Bugt',
+      latitude: 69.039958,
+      longitude: -53.300171,
+      radius: 6,
+      fillKey: 'gt50'
+    }, {
+      name: 'Ilulissat',
+      latitude: 69.219812,
+      longitude: -51.098603,
+      radius: 6,
+      fillKey: 'gt50'
+    },
+
+  ], {
+    popupTemplate: function(geo, data) {
+      return "<div class='hoverinfo'>" + data.name + "</div>";
+    }
+  });
+}
+
+Datamap.prototype._handleMapReady = function(datamap) {
+  this.zoom = new Zoom({
+    $container: this.$container,
+    datamap: datamap
+  });
+}
+
+var map = new Datamap();
+     </script>
+</body>
