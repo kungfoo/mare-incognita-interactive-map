@@ -515,7 +515,55 @@ function Datamap() {
         distance: 300,
         arcSharpness: 0.5,
         leg: "Ilulissat – Disco Bugt – Ilulissat"
+      }, 
+
+      {
+        destination: {
+          latitude: 64.181410,
+          longitude: -51.694138,
+        },
+        origin: {
+          latitude: 69.039958,
+          longitude: -53.300171
+        },
+        duration: 1,
+        distance: 350,
+        arcSharpness: 0,
+        leg: "Ilulissat - Disco Bugt - Nuuk"
       },
+
+      {
+        origin: {
+          latitude: 64.181410,
+          longitude: -51.694138,
+        },
+        destination: {
+          latitude: 50.7628,
+          longitude: -1.3005,
+        },
+        duration: 3,
+        distance: 2500,
+        arcSharpness: -5,
+        leg: "Nuuk - Pamiut - Prince Christian Sound - Cowes"
+      },
+
+      {
+        destination: {
+          latitude: 51.394526,
+          longitude: 3.555878
+        },
+        origin: {
+          latitude: 50.7628,
+          longitude: -1.3005,
+        },
+        duration: 1,
+        distance: 300,
+        arcSharpness: 0.5,
+        leg: "Cowes - Breskens"
+      },
+
+    
+
     ], {
       strokeWidth: 5,
       arcSharpness: -0.4,
@@ -599,7 +647,13 @@ function Datamap() {
       radius: 6,
       fillKey: 'gt50'
     },
-
+    {
+      name: 'Cowes',
+      latitude: 50.7628,
+      longitude: -1.3005,
+      radius: 6,
+      fillKey: 'gt50'
+    },
   ], {
     popupTemplate: function(geo, data) {
       return "<div class='hoverinfo'>" + data.name + "</div>";
